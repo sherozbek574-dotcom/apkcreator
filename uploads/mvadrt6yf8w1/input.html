@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Регистрация по коду на почту</title>
+    <style>
+        body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background: #f4f4f9; margin: 0; }
+        .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 320px; text-align: center; }
+        input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; }
+        button { background: #007BFF; color: white; border: none; padding: 10px 15px; width: 100%; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #0056b3; }
+        .hidden { display: none; }
+        #message { margin-top: 15px; font-weight: bold; font-size: 13px; word-break: break-all; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>Регистрация</h2>
+    
+    <!-- Шаг 1: Ввод почты -->
+    <div id="step-email">
+        <p>Введите вашу почту:</p>
+        <input type="email" id="email-input" placeholder="example@mail.com" required>
+        <button onclick="sendCode()">Отправить код</button>
+    </div>
+
+    <!-- Шаг 2: Ввод кода -->
+    <div id="step-code" class="hidden">
+        <p>Код отправлен на вашу почту. Введите его:</p>
+        <input type="text" id="code-input" placeholder="Введите код">
+        <button onclick="verifyCode()">Подтвердить</button>
+    </div>
+
+    <!-- Шаг 3: Успех -->
+    <div id="step-success" class="hidden">
+        <h3 style="color: green;">Успешно зарегистрировано! 🎉</h3>
+        <p>Добро пожаловать на сайт.</p>
+    </div>
+
+    <p id="message"></p>
+</div>
+
+<!-- Подключаем библиотеку EmailJS -->
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+
+<script>
+    // Инициализация EmailJS вашим ключом
+    emailjs.init("C94jm2x0ZmPx0Lu1D");
+
+    let generatedCode = null;
+    let userEmail = "";
+
+    function sendCode() {
+        userEmail = document.getElementById("email-input").value.trim();
+        const msg = document.getElementById("message");
+
+        if (!userEmail || !userEmail.includes("@")) {
+            msg.style.color = "red";
+            msg.textContent = "Введите корректный email!";
+            return;
+        }
+
+        // Генерируем случайный 6-значный код
+        generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+        msg.style.color = "blue";
+        msg.textContent = "Отправка кода на почту...";
+
+        const templateParams = {
+            to_email: userEmail,
+            passcode: generatedCode
+        };
+
+        // Отправка через обновленный Template ID
+        emailjs.send("service_cweh5f9", "template_10zqdmp", templateParams)
+            .then(function(response) {
+                msg.textContent = "";
+                document.getElementById("step-email").classList.add("hidden");
+                document.getElementById("step-code").classList.remove("hidden");
+            }, function(error) {
+                msg.style.color = "red";
+                msg.textContent = "Ошибка: " + (error.text || JSON.stringify(error));
+                console.log("FAILED...", error);
+            });
+    }
+
+    function verifyCode() {
+        const enteredCode = document.getElementById("code-input").value.trim();
+        const msg = document.getElementById("message");
+
+        if (enteredCode === generatedCode) {
+            document.getElementById("step-code").classList.add("hidden");
+            document.getElementById("step-success").classList.remove("hidden");
+            msg.textContent = "";
+        } else {
+            msg.style.color = "red";
+            msg.textContent = "Неверный код! Попробуйте еще раз.";
+        }
+    }
+</script>
+
+</body>
+</html>
