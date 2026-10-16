@@ -1,0 +1,139 @@
+name: Deploy site and build WebView APK
+run-name: Build ${{ inputs.job_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Папка uploads/<job_id>"
+        required: true
+      ext:
+        description: "html или zip"
+        required: true
+        default: "html"
+      slug:
+        description: "Адрес сайта"
+        required: true
+      app_name:
+        description: "Название приложения"
+        required: true
+        default: "MyApp"
+      app_id:
+        description: "Package ID"
+        required: true
+        default: "com.app.myapp"
+      site_url:
+        description: "Полный адрес сайта"
+        required: true
+      make_apk:
+        description: "Собирать APK"
+        required: true
+        default: "true"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    concurrency:
+      group: sites-deploy
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      JOB: ${{ inputs.job_id }}
+      EXT: ${{ inputs.ext }}
+      SLUG: ${{ inputs.slug }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare site
+        run: |
+          [[ "$SLUG" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "Плохой слаг"; exit 1; }
+          rm -rf "sites/$SLUG"
+          mkdir -p "sites/$SLUG"
+          if [ "$EXT" = "zip" ]; then
+            mkdir -p tmp_unzip
+            unzip -q "uploads/$JOB/input.zip" -d tmp_unzip
+            IDX=$(find tmp_unzip -iname 'index.html' -not -path '*/__MACOSX/*' | awk '{print length, $0}' | sort -n | head -n 1 | cut -d' ' -f2-)
+            if [ -z "$IDX" ]; then
+              IDX=$(find tmp_unzip -iname '*.html' -not -path '*/__MACOSX/*' | head -n 1)
+              [ -z "$IDX" ] && echo "В ZIP нет HTML файла" && exit 1
+              cp -r "$(dirname "$IDX")"/. "sites/$SLUG/"
+              mv "sites/$SLUG/$(basename "$IDX")" "sites/$SLUG/index.html"
+            else
+              cp -r "$(dirname "$IDX")"/. "sites/$SLUG/"
+            fi
+            rm -rf tmp_unzip
+          else
+            cp "uploads/$JOB/input.html" "sites/$SLUG/index.html"
+          fi
+          ls -la "sites/$SLUG"
+
+      - name: Commit site
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -rf "uploads/$JOB"
+          git add -A sites uploads
+          git commit -m "Deploy $SLUG" || echo "Нечего коммитить"
+          git pull --rebase
+          git push
+
+      - name: Collect pages folder
+        run: |
+          mkdir -p _site
+          cp -r sites/. _site/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  apk:
+    needs: deploy
+    if: ${{ inputs.make_apk == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      APP_NAME: ${{ inputs.app_name }}
+      APP_ID: ${{ inputs.app_id }}
+      SITE_URL: ${{ inputs.site_url }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Create WebView project
+        run: |
+          mkdir -p www
+          echo '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>App</title><p style="font-family:sans-serif;padding:24px">Нет подключения к интернету</p>' > www/index.html
+          npm init -y
+          npm i @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
+          node -e "require('fs').writeFileSync('capacitor.config.json', JSON.stringify({appId:process.env.APP_ID,appName:process.env.APP_NAME,webDir:'www',server:{url:process.env.SITE_URL,cleartext:false,allowNavigation:['*']}},null,2))"
+          cat capacitor.config.json
+          npx cap add android
+          npx cap sync android
+
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ inputs.job_id }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
